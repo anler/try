@@ -1,5 +1,5 @@
 (ns try.core
-  (:refer-clojure :exclude [val]
+  (:refer-clojure :exclude [val sequence]
                   :rename {apply clj-apply
                            map   clj-map})
   (:require [clojure.pprint]))
@@ -20,13 +20,14 @@
        (= ::failure)))
 
 (defn val
-  "Retrieve the value of the Try."
+  "Retrieve the value of try no matter if it's a success or a
+  failure."
   [try]
   (:value try))
 
 (defn val-throw
-  "Retrieve the value of the Try, but throw an exception if it's a
-  failed Try."
+  "Retrieve the value of try, but throw an exception if it's a failed
+  Try. This is the same as dereferencing try with deref or @."
   [try]
   (let [v (val try)]
     (if (success? try)
@@ -39,7 +40,7 @@
   clojure.lang.IDeref
   (deref [this] (val-throw this)))
 
-(defmethod clojure.pprint/simple-dispatch Try [try]
+(defmethod clojure.pprint/simple-dispatch Try [^Try try]
   ((get-method clojure.pprint/simple-dispatch clojure.lang.IRecord) try))
 
 (defmethod clojure.core/print-method Try [^Try try ^java.io.Writer w]
@@ -68,7 +69,7 @@
 
 (defmacro tryc-let
   "Wrap a let with bindings and body in a tryc."
-  [bindings & body] 
+  [bindings & body]
   `(tryc
      (let ~bindings
        ~@body)))
@@ -81,9 +82,14 @@
     try))
 
 (defmacro map->
-  "Map each form to the try."
+  "Wrap each form in a map application and thread try through it.
+  Equivalent to:
+  (-> try
+      (map first-form)
+      (map second-form)
+      ...)"
   [try & forms]
-  (let [forms* (for [form forms] 
+  (let [forms* (for [form forms]
                  `(map ~(if (seq? form)
                           `#(~(first form) % ~@(next form))
                           `#(~form %))))]
@@ -98,9 +104,14 @@
     (fail (f (val try)))))
 
 (defmacro map-failure->
-  "Map-failure each form to the try."
+  "Wrap each form in a map-failure application and thread try through it.
+  Equivalent to:
+  (-> try
+      (map-failure first-form)
+      (map-failure second-form)
+      ...)"
   [try & forms]
-  (let [forms* (for [form forms] 
+  (let [forms* (for [form forms]
                  `(map-failure ~(if (seq? form)
                                   `#(~(first form) % ~@(next form))
                                   `#(~form %))))]
@@ -114,29 +125,42 @@
   (map-failure g (map f try)))
 
 (defn apply
-  "Apply value in ftry if it's a success to value in try if it's also a
-  success."
-  [ftry try & rest-try]
-  (let [all-try (cons try rest-try)]
-    (if (success? ftry)
-      (if (every? success? all-try)
-        (clj-apply (val ftry) (clj-map val all-try))
-        try)
-      ftry)))
+  "Apply value in ftry if it's a success to the values in all the
+  try if all of them are also a success. If ftry is a failure it is
+  returned, otherwise the first failed try is returned."
+  [ftry & try]
+  (if (success? ftry)
+    (if (every? success? try)
+      (succeed (clj-apply (val ftry) (clj-map val try)))
+      (first (filter failure? try)))
+    ftry))
 
 (defn bind
-  "Apply f to try's value if is successful."
+  "Apply f to try's value if is successful and return its result,
+  otherwise return try."
   [try f]
   (if (success? try)
     (f (val try))
     try))
 
 (defmacro bind->
-  "Bind each form to the try."
+  "Wrap each form in a bind application and thread try through it.
+  Equivalent to:
+  (-> try
+      (bind first-form)
+      (bind second-form)
+      ...)"
   [try & forms]
-  (let [forms* (for [form forms] 
+  (let [forms* (for [form forms]
                  `(bind ~(if (seq? form)
                            `#(~(first form) % ~@(next form))
                            `#(~form %))))]
     `(-> ~try
          ~@forms*)))
+
+(defn sequence
+  "Transform a collection coll of try items in a try where the value is
+  a collection of each try value. If given an empty collection,
+  returns a successful try with the empty vector as value."
+  [coll]
+  (clj-apply apply (succeed (partial conj [])) coll))
