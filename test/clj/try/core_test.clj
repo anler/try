@@ -146,22 +146,24 @@
 (t/deftest apply-test
   (t/testing "apply applies f inside a successful Try, to a successful Try value."
     (t/is (= 4
-             (try/apply (try/succeed inc)
-                        (try/succeed 3)))))
+             (try/val (try/apply (try/succeed inc)
+                                 (try/succeed 3))))))
   (t/testing "apply applies f inside a successful Try, to all the successful Try values."
     (t/is (= 9
-             (try/apply (try/succeed +)
-                        (try/succeed 3)
-                        (try/succeed 3)
-                        (try/succeed 3)))))
+             (try/val (try/apply (try/succeed +)
+                                 (try/succeed 3)
+                                 (try/succeed 3)
+                                 (try/succeed 3))))))
   (t/testing "apply returns the failed Try with the f if applied to a successful Try value."
     (t/is (= inc
              (try/val (try/apply (try/fail inc)
                                  (try/succeed 3))))))
 
-  (t/testing "apply returns the failed Try to which the successful Try with if is applied."
+  (t/testing "apply returns the first failed Try to which the successful Try with if is applied."
     (t/is (= 3
              (try/val (try/apply (try/succeed inc)
+                                 (try/succeed 1)
+                                 (try/succeed 2)
                                  (try/fail 3)))))))
 
 (t/deftest bind-test
@@ -184,3 +186,18 @@
              (try/val (try/bind-> (try/fail 3)
                                   ((comp try/succeed inc))
                                   ((comp try/succeed inc))))))))
+
+(t/deftest sequence-test
+  (t/testing "sequence transform a collection of successes into a success of collection."
+    (t/is (= [1 2 3]
+             (try/val (try/sequence [(try/succeed 1)
+                                     (try/succeed 2)
+                                     (try/succeed 3)])))))
+  (t/testing "sequence returns the first failure in the collection"
+    (t/is (= 2
+             (try/val (try/sequence [(try/succeed 1)
+                                     (try/fail 2)
+                                     (try/fail 3)])))))
+  (t/testing "sequence returns the empty vector if the collection is empty"
+    (t/is (= []
+             (try/val (try/sequence []))))))
