@@ -32,6 +32,20 @@
     (t/is (= :some-val
              (try/val (try/succeed :some-val))))))
 
+(t/deftest val-or-test
+  (t/testing "val-or returns the value of a successful Try."
+    (t/is (= :some-val
+             (try/val-or (try/succeed :some-val) :default-val))))
+  (t/testing "val-or doesn't evaluate the default value if given a successful Try."
+    (let [effect (volatile! nil)
+          result (try/val-or (try/succeed :some-val) (do (reset! effect :executed)))]
+      (t/is (= :some-val
+               result))
+      (t/is (nil? @effect))))
+  (t/testing "val returns the default value if given a failed Try."
+    (t/is (= :default-val
+             (try/val-or (try/fail :some-val) :default-val)))))
+
 (t/deftest val-throw-test
   (t/testing "val-throw returns the value of a successful Try."
     (t/is (= :some-val
@@ -55,21 +69,21 @@
       (t/is (= "called"
                @(try/succeed :some-val))))))
 
-(t/deftest tryc-test
-  (t/testing "tryc returns a successful Try if no exception is thrown."
-    (t/is (try/success? (try/tryc :some-val))))
+(t/deftest try>-test
+  (t/testing "try> returns a successful Try if no exception is thrown."
+    (t/is (try/success? (try/try> :some-val))))
   (t/testing "tryc returns a failed Try if an exception is thrown."
-    (t/is (try/failure? (try/tryc (throw (Exception. "err")))))))
+    (t/is (try/failure? (try/try> (throw (Exception. "err")))))))
 
 (t/deftest tryc-let-test
-  (t/testing "tryc-let is like tryc but accepts bindings"
+  (t/testing "try-let is like tryc but accepts bindings"
     (t/is (= :some-val
-             @(try/tryc-let [v :some-val]
-                            v))))
-  (t/testing "tryc-let catches any exception thrown in the let."
+             @(try/try-let [v :some-val]
+                           v))))
+  (t/testing "try-let catches any exception thrown in the let."
     (t/is (try/failure?
-            (try/tryc-let [v (throw (Exception. "err"))]
-                          v)))))
+            (try/try-let [v (throw (Exception. "err"))]
+                         v)))))
 
 (t/deftest map-test
   (t/testing "map applies f to a successful Try value."
@@ -83,19 +97,6 @@
                    (try/map #(throw (IllegalArgumentException. (str %)))
                             (try/succeed 3))))))
 
-(t/deftest map->-test
-  (t/testing "map-> applies multiple functions to a successful Try value."
-    (t/is (= 9
-             (try/val (try/map-> (try/succeed 3)
-                                 inc
-                                 inc
-                                 (+ 4)))))
-    (t/is (= 3
-             (try/val (try/map-> (try/fail 3)
-                                 inc
-                                 inc
-                                 (+ 4)))))))
-
 (t/deftest map-failure-test
   (t/testing "map-failure applies f to a failed Try value."
     (t/is (= 3
@@ -107,19 +108,6 @@
     (t/is (thrown? IllegalArgumentException
                    (try/map-failure #(throw (IllegalArgumentException. (str %)))
                                     (try/fail 3))))))
-
-(t/deftest map-failure->-test
-  (t/testing "map-failure-> applies multiple functions to a failed Try value."
-    (t/is (= 9
-             (try/val (try/map-failure-> (try/fail 3)
-                                         inc
-                                         inc
-                                         (+ 4)))))
-    (t/is (= 3
-             (try/val (try/map-failure-> (try/succeed 3)
-                                         inc
-                                         inc
-                                         (+ 4)))))))
 
 (t/deftest bimap-test
   (t/testing "bimap applies f to a successful Try value."
@@ -167,25 +155,16 @@
                                  (try/fail 3)))))))
 
 (t/deftest bind-test
-  (t/testing "bind applies f to a successful Try."
-    (t/is (= 4
+  (t/testing "bind applies each f while they return a successful Try."
+    (t/is (= 5
              (try/val (try/bind (try/succeed 3)
+                                (comp try/succeed inc)
                                 (comp try/succeed inc))))))
-  (t/testing "bind doesn't apply f to a failed Try."
+  (t/testing "bind doesn't apply an f to a failed Try returned by one f before."
     (t/is (= 3
              (try/val (try/bind (try/fail 3)
+                                (comp try/fail inc)
                                 (comp try/succeed inc)))))))
-
-(t/deftest bind->-test
-  (t/testing "bind-> applies multiple functions to a successful Try value."
-    (t/is (= 5
-             (try/val (try/bind-> (try/succeed 3)
-                                  ((comp try/succeed inc))
-                                  ((comp try/succeed inc))))))
-    (t/is (= 3
-             (try/val (try/bind-> (try/fail 3)
-                                  ((comp try/succeed inc))
-                                  ((comp try/succeed inc))))))))
 
 (t/deftest sequence-test
   (t/testing "sequence transform a collection of successes into a success of collection."
@@ -201,3 +180,19 @@
   (t/testing "sequence returns the empty vector if the collection is empty"
     (t/is (= []
              (try/val (try/sequence []))))))
+
+(t/deftest into-test
+  (t/testing "into transform a collection of successes into a success of collection."
+    (t/is (= {:one 1, :two 2}
+             (try/val (try/into {} [(try/succeed [:one 1])
+                                    (try/succeed [:two 2])])))))
+  (t/testing "into transform a collection with at least one failure into a failure of collection of failure values."
+    (t/is (= {:one 1, :two 2}
+             (try/val (try/into {} [(try/succeed 1)
+                                    (try/fail [:one 1])
+                                    (try/fail [:two 2])])))))
+  (t/testing "into returns the given collection if the collection of trys is empty"
+    (t/is (= []
+             (try/val (try/into [] []))))
+    (t/is (= {}
+             (try/val (try/into {} []))))))

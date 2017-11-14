@@ -1,7 +1,8 @@
 (ns try.core
   (:refer-clojure :exclude [val sequence]
                   :rename {apply clj-apply
-                           map   clj-map})
+                           map   clj-map
+                           into  clj-into})
   (:require [clojure.pprint]))
 
 
@@ -24,6 +25,14 @@
   failure."
   [try]
   (:value try))
+
+(defmacro val-or
+  "Retrieve the value of try if it's a success or evaluate and return
+  default if it's a failure."
+  [try default]
+  `(if (success? ~try)
+     (val ~try)
+     ~default))
 
 (defn val-throw
   "Retrieve the value of try, but throw an exception if it's a failed
@@ -56,7 +65,7 @@
   [value]
   (->Try ::failure value))
 
-(defmacro tryc
+(defmacro try>
   "Wrap body in a try/catch that returns a successful Try
   if no exception is raised, or a failed Try if an exception
   is raised."
@@ -67,10 +76,10 @@
      (catch Exception e#
        (fail e#))))
 
-(defmacro tryc-let
+(defmacro try-let
   "Wrap a let with bindings and body in a tryc."
   [bindings & body]
-  `(tryc
+  `(try>
      (let ~bindings
        ~@body)))
 
@@ -81,42 +90,12 @@
     (succeed (f (val try)))
     try))
 
-(defmacro map->
-  "Wrap each form in a map application and thread try through it.
-  Equivalent to:
-  (-> try
-      (map first-form)
-      (map second-form)
-      ...)"
-  [try & forms]
-  (let [forms* (for [form forms]
-                 `(map ~(if (seq? form)
-                          `#(~(first form) % ~@(next form))
-                          `#(~form %))))]
-    `(->> ~try
-          ~@forms*)))
-
 (defn map-failure
   "Apply function f to try's value if is a failed Try."
   [f try]
   (if (success? try)
     try
     (fail (f (val try)))))
-
-(defmacro map-failure->
-  "Wrap each form in a map-failure application and thread try through it.
-  Equivalent to:
-  (-> try
-      (map-failure first-form)
-      (map-failure second-form)
-      ...)"
-  [try & forms]
-  (let [forms* (for [form forms]
-                 `(map-failure ~(if (seq? form)
-                                  `#(~(first form) % ~@(next form))
-                                  `#(~form %))))]
-    `(->> ~try
-          ~@forms*)))
 
 (defn bimap
   "Apply function f to try's value if it's a success, otherwise apply
@@ -127,7 +106,14 @@
 (defn apply
   "Apply value in ftry if it's a success to the values in all the
   try if all of them are also a success. If ftry is a failure it is
-  returned, otherwise the first failed try is returned."
+  returned, otherwise the first failed try is returned.
+
+  Examples:
+  (apply (succeed +) (succeed 1) (succeed 2) (succeed 3))
+  => #try.core.Try{:tag :try.core/success, :value 6}
+
+  (apply (succeed +) (succeed 1) (fail 2) (fail 3))
+  => #try.core.Try{:tag :try.core/failure, :value 2}"
   [ftry & try]
   (if (success? ftry)
     (if (every? success? try)
@@ -137,26 +123,27 @@
 
 (defn bind
   "Apply f to try's value if is successful and return its result,
-  otherwise return try."
-  [try f]
-  (if (success? try)
-    (f (val try))
-    try))
+  otherwise return try.
+  Examples:
+  (bind (succeed 1)
+        #(succeed (+ 2 %)))
+  => #try.core.Try{:tag :try.core/success, :value 3}
 
-(defmacro bind->
-  "Wrap each form in a bind application and thread try through it.
-  Equivalent to:
-  (-> try
-      (bind first-form)
-      (bind second-form)
-      ...)"
-  [try & forms]
-  (let [forms* (for [form forms]
-                 `(bind ~(if (seq? form)
-                           `#(~(first form) % ~@(next form))
-                           `#(~form %))))]
-    `(-> ~try
-         ~@forms*)))
+  (bind (fail 1)
+        #(succeed (+ 2 %)))
+  => #try.core.Try{:tag :try.core/failure, :value 1}
+
+  (bind (succeed 1)
+        #(fail (str \"err\" %))
+        #(succeed (+ 1 %)))
+  => #try.core.Try{:tag :try.core/failure, :value \"err1\"}"
+  [try & fs]
+  (let [x (volatile! try)]
+    (loop [[f & fs] fs]
+      (when (and f (success? @x))
+        (vreset! x (f @@x))
+        (recur fs)))
+    @x))
 
 (defn sequence
   "Transform a collection coll of try items in a try where the value is
@@ -164,3 +151,23 @@
   returns a successful try with the empty vector as value."
   [coll]
   (clj-apply apply (succeed (partial conj [])) coll))
+
+(defn into
+  "If all items in coll are successful Try, return a successful Try
+  which value is the to collection filled with the value of each Try
+  in coll. Otherwise return a failed Try which value is the to
+  collection filled with the value of each Try in coll.
+  Examples:
+  (into [] (list (succeed 1) (succeed 2) (succeed 3)))
+  => #try.core.Try{:tag :try.core/success, :value [1 2 3]}
+
+  (into [] [(succeed 1) (fail 2) (fail 3)])
+  => #try.core.Try{:tag :try.core/failure, :value [2 3]}
+  "
+  [to coll]
+  (if (empty? coll)
+    (succeed to)
+    (let [[successes failures] (partition-by success? coll)]
+      (if (empty? failures)
+        (succeed (clj-into to (clj-map val successes)))
+        (fail (clj-into to (clj-map val failures)))))))
