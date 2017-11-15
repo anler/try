@@ -11,4 +11,4 @@ an error in your application context as normal values that can be
 manipulated by the combinators provided by the library. Handling
 errors this way let you write more composable code.
 
-See the [api reference](https://anler.github.io/try/doc/api/) for detailed information.
+See the [api reference](https://anler.github.io/try/) for detailed information.
