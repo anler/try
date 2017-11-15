@@ -1,4 +1,4 @@
-(defproject anler/try "0.2.0"
+(defproject anler/try "0.3.0"
   :description "Handle exceptions as values in Clojure."
   :url "https://github.com/anler/try"
   :license {:name "BSD (2-Clause)"

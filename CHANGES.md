@@ -1,5 +1,13 @@
 # Changelog #
 
+## Version 0.3.0 ##
+
+Date: 2017-11-15
+
+- Added a new combinator: into
+- Added new macro try>
+- Removed macros tryc, tryc-let, map->, map-failure->, bind->
+
 ## Version 0.2.0 ##
 
 Date: 2017-11-11
